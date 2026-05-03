@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-red: #B22222;
+  --color-brand-brown: #3E2723;
+  --color-brand-tan: #D2B48C;
+  --color-off-white: #FAF9F6;
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-off-white text-brand-brown antialiased;
+  }
+}
+
+.glass {
+  background-color: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(178, 34, 34, 0.1);
+  box-shadow: 0 4px 6px -1px rgba(62, 39, 35, 0.05);
+}
+
+.coffee-card {
+  background-color: white;
+  border: 1px solid rgba(62, 39, 35, 0.1);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.coffee-card:hover {
+  border-color: #B22222;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(178, 34, 34, 0.1);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
