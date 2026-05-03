@@ -54,43 +54,99 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
 
   const loadMemberData = async (mId: string) => {
     try {
-      const [ordersData, pointsData] = await Promise.all([
+      const [rawOrdersData, pointsData] = await Promise.all([
         api.getMemberOrders(mId),
         api.getMemberPoints(mId)
       ]);
       
+      const ordersData = Array.isArray(rawOrdersData) 
+        ? rawOrdersData 
+        : ((rawOrdersData as any).orders || (rawOrdersData as any).transactions || (rawOrdersData as any).history || []);
+
       // Deduplicate and normalize orders
       const normalizedOrders = ordersData.reduce((acc: Order[], current: any) => {
-        const orderId = current.id || current.order_id || 'unknown';
-        const exists = acc.find(o => o.id === orderId);
+        const orderId = current.id || current.order_id || current.orderNumber || 'unknown';
+        let order = acc.find(o => o.id === orderId);
         
-        if (!exists) {
-          // Normalize total - handle potential field name variations or sub-items calculation
-          const total = current.total ?? current.order_total ?? current.amount ?? 
-                        (current.items ? current.items.reduce((s: number, i: any) => s + ((i.price || 0) * (i.quantity || 1)), 0) : 0);
+        // Extract items from current row or handle flat item pattern
+        const rawItems = current.items || current.order_items || current.order_details || current.line_items || current.details || [];
+        let itemsForThisRow: any[] = [];
+
+        if (Array.isArray(rawItems) && rawItems.length > 0) {
+          itemsForThisRow = rawItems.map((item: any) => ({
+            item_id: item.item_id || item.id || item.menu_item_id || item.productId || '',
+            name: item.name || item.item_name || item.product_name || item.title || 'Coffee Item',
+            size: item.size || item.variant || 'Medium',
+            quantity: Number(item.quantity || item.qty || item.count || 1),
+            price: Number(item.price || item.unit_price || item.amount || 0)
+          }));
+        } else if (current.item_name || current.product_name || current.name || current.menu_item_id) {
+          // This row itself might be an item (flat list pattern)
+          itemsForThisRow = [{
+            item_id: current.item_id || current.menu_item_id || current.id || 'item-unknown',
+            name: current.item_name || current.product_name || current.name || 'Coffee Item',
+            size: current.size || 'Medium',
+            quantity: Number(current.quantity || current.qty || 1),
+            price: Number(current.price || current.unit_price || 0)
+          }];
+        }
+
+        if (!order) {
+          const total = Number(current.total ?? current.order_total ?? current.amount ?? current.grand_total ?? current.order_amount ?? 
+                        itemsForThisRow.reduce((s: number, i: any) => s + (i.price * i.quantity), 0));
           
           acc.push({
             id: orderId,
             member_id: current.member_id || current.memberId || mId,
-            status: current.status || 'COMPLETED',
-            created_at: current.created_at || current.order_date || current.date || new Date().toISOString(),
+            status: current.status || current.order_status || 'COMPLETED',
+            created_at: current.created_at || current.order_date || current.date || current.timestamp || new Date().toISOString(),
             total: total,
-            items: current.items || current.order_items || [],
-            location_name: current.location_name || current.store_name || current.location,
-            location_city_state: current.location_city_state || (current.city && current.state ? `${current.city}, ${current.state}` : current.location)
+            items: itemsForThisRow,
+            location_name: current.location_name || current.store_name || current.location || current.store,
+            location_city_state: current.location_city_state || (current.city && current.state ? `${current.city}, ${current.state}` : '')
           });
+        } else {
+          // If order exists, add items from this row if they aren't already included
+          itemsForThisRow.forEach(newItem => {
+            const itemExists = order!.items.some(existing => 
+              (existing.item_id && existing.item_id === newItem.item_id) || 
+              (existing.name === newItem.name && existing.size === newItem.size)
+            );
+            if (!itemExists) {
+              order!.items.push(newItem);
+            }
+          });
+          
+          // If the order was created with 0 total (inferred), keep updating it
+          if (current.total === undefined && current.order_total === undefined && current.amount === undefined && current.grand_total === undefined) {
+             order.total = order.items.reduce((s: number, i: any) => s + (i.price * i.quantity), 0);
+          }
         }
         return acc;
       }, []);
 
       setOrders(normalizedOrders);
-      setServerPoints(pointsData.points);
       
       // Calculate points based on normalized totals: 1 point for every whole dollar spent
       const calculatedPoints = normalizedOrders.reduce((sum, order) => {
-        return sum + Math.floor(order.total);
+        return sum + Math.floor(order.total || 0);
       }, 0);
       
+      // Use points from server if available (handle common field names)
+      const pointsDataAny = pointsData as any;
+      const pointsFromServerRaw = pointsDataAny.total_points ?? 
+                                  pointsDataAny.points ?? 
+                                  pointsDataAny.point_balance ?? 
+                                  pointsDataAny.points_balance ?? 
+                                  pointsDataAny.pts ?? 
+                                  pointsDataAny.balance ?? 
+                                  null;
+                                  
+      const pointsFromServer = pointsFromServerRaw !== null && !isNaN(Number(pointsFromServerRaw)) 
+        ? Number(pointsFromServerRaw) 
+        : null;
+        
+      setServerPoints(pointsFromServer);
       setPoints(calculatedPoints);
     } catch (err) {
       console.error('Failed to load member data', err);
@@ -215,7 +271,9 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
             
               <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-7xl font-bold text-brand-brown tracking-tighter">{points}</span>
+                  <span className="text-7xl font-bold text-brand-brown tracking-tighter">
+                    {typeof serverPoints === 'number' ? serverPoints : points}
+                  </span>
                   <span className="text-brand-brown/40 font-bold text-xs uppercase tracking-widest">Available Points</span>
                 </div>
                 {serverPoints !== null && (
@@ -225,23 +283,23 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
                   </div>
                 )}
               </div>
-          </div>
-          
-          <div className="relative z-10 space-y-3">
-            <div className="flex justify-between text-[10px] font-bold text-brand-brown/60 uppercase tracking-widest">
-              <span>Next Reward Level</span>
-              <span className="text-brand-red font-black">{points % 100}%</span>
             </div>
-            <div className="h-2 bg-off-white rounded-full overflow-hidden border border-brand-brown/5">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${(points % 100)}%` }}
-                className="h-full bg-brand-red"
-              />
+            
+            <div className="relative z-10 space-y-3">
+              <div className="flex justify-between text-[10px] font-bold text-brand-brown/60 uppercase tracking-widest">
+                <span>Next Reward Level</span>
+                <span className="text-brand-red font-black">{(typeof serverPoints === 'number' ? serverPoints : points) % 100}%</span>
+              </div>
+              <div className="h-2 bg-off-white rounded-full overflow-hidden border border-brand-brown/5">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${((typeof serverPoints === 'number' ? serverPoints : points) % 100)}%` }}
+                  className="h-full bg-brand-red"
+                />
+              </div>
             </div>
-          </div>
-          <Star className="absolute -right-12 -top-12 text-brand-red/2 w-64 h-64 rotate-12" />
-        </motion.div>
+            <Star className="absolute -right-12 -top-12 text-brand-red/2 w-64 h-64 rotate-12" />
+          </motion.div>
 
         <div className="md:col-span-4 grid grid-rows-2 gap-5">
           <motion.div 

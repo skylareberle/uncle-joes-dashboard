@@ -62,6 +62,7 @@ export interface Order {
   items: Array<{ 
     item_id: string; 
     name?: string; 
+    item_name?: string;
     size?: string; 
     quantity: number; 
     price: number 
