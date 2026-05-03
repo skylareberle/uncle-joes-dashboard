@@ -54,10 +54,13 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
 
   const loadMemberData = async (mId: string) => {
     try {
-      const [rawOrdersData, pointsData] = await Promise.all([
+      const results = await Promise.allSettled([
         api.getMemberOrders(mId),
         api.getMemberPoints(mId)
       ]);
+      
+      const rawOrdersData = results[0].status === 'fulfilled' ? results[0].value : [];
+      const pointsData = results[1].status === 'fulfilled' ? results[1].value : { points: null };
       
       const ordersData = Array.isArray(rawOrdersData) 
         ? rawOrdersData 
@@ -65,27 +68,50 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
 
       // Deduplicate and normalize orders
       const normalizedOrders = ordersData.reduce((acc: Order[], current: any) => {
-        const orderId = current.id || current.order_id || current.orderNumber || 'unknown';
+        // Prioritize order_id or orderNumber for grouping over a generic 'id' field which might be a row ID
+        const orderId = String(
+          current.order_id || 
+          current.order_number || 
+          current.orderNumber || 
+          current.transaction_id || 
+          current.receipt_id || 
+          current.id || 
+          'unknown'
+        );
         let order = acc.find(o => o.id === orderId);
         
-        // Extract items from current row or handle flat item pattern
-        const rawItems = current.items || current.order_items || current.order_details || current.line_items || current.details || [];
+        // Extract items from current row or nested data
+        const itemSources = [
+          current.items, 
+          current.order_items, 
+          current.order_details, 
+          current.line_items, 
+          current.details,
+          current.products,
+          current.order_items_details
+        ].filter(src => Array.isArray(src) && src.length > 0);
+
+        const rawItems = itemSources.length > 0 ? itemSources[0] : [];
         let itemsForThisRow: any[] = [];
 
         if (Array.isArray(rawItems) && rawItems.length > 0) {
           itemsForThisRow = rawItems.map((item: any) => ({
-            item_id: item.item_id || item.id || item.menu_item_id || item.productId || '',
-            name: item.name || item.item_name || item.product_name || item.title || 'Coffee Item',
-            size: item.size || item.variant || 'Medium',
+            item_id: String(item.item_id || item.menu_item_id || item.id || item.productId || item.sku || ''),
+            name: String(item.name || item.item_name || item.product_name || item.title || 'Coffee Item'),
+            size: String(item.size || item.variant || 'Medium'),
             quantity: Number(item.quantity || item.qty || item.count || 1),
             price: Number(item.price || item.unit_price || item.amount || 0)
           }));
         } else if (current.item_name || current.product_name || current.name || current.menu_item_id) {
           // This row itself might be an item (flat list pattern)
+          // Look for a unique row/line ID that isn't the order ID
+          const potentialItemId = current.line_id || current.item_id || current.menu_item_id || current.item_id_key || current.id;
+          const itemId = String(potentialItemId !== orderId ? potentialItemId : '');
+          
           itemsForThisRow = [{
-            item_id: current.item_id || current.menu_item_id || current.id || 'item-unknown',
-            name: current.item_name || current.product_name || current.name || 'Coffee Item',
-            size: current.size || 'Medium',
+            item_id: itemId || `item-${current.item_name || current.product_name || current.name || 'unknown'}-${Math.random().toString(36).substr(2, 5)}`,
+            name: String(current.item_name || current.product_name || current.name || 'Coffee Item'),
+            size: String(current.size || 'Medium'),
             quantity: Number(current.quantity || current.qty || 1),
             price: Number(current.price || current.unit_price || 0)
           }];
@@ -101,23 +127,25 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
             status: current.status || current.order_status || 'COMPLETED',
             created_at: current.created_at || current.order_date || current.date || current.timestamp || new Date().toISOString(),
             total: total,
-            items: itemsForThisRow,
+            items: [...itemsForThisRow],
             location_name: current.location_name || current.store_name || current.location || current.store,
             location_city_state: current.location_city_state || (current.city && current.state ? `${current.city}, ${current.state}` : '')
           });
         } else {
           // If order exists, add items from this row if they aren't already included
           itemsForThisRow.forEach(newItem => {
-            const itemExists = order!.items.some(existing => 
-              (existing.item_id && existing.item_id === newItem.item_id) || 
-              (existing.name === newItem.name && existing.size === newItem.size)
-            );
-            if (!itemExists) {
+            const isDuplicate = order!.items.some(existing => {
+              const hasRealIds = existing.item_id && newItem.item_id && !existing.item_id.startsWith('item-') && !newItem.item_id.startsWith('item-');
+              if (hasRealIds) return existing.item_id === newItem.item_id;
+              return existing.name === newItem.name && existing.size === newItem.size;
+            });
+
+            if (!isDuplicate) {
               order!.items.push(newItem);
             }
           });
           
-          // If the order was created with 0 total (inferred), keep updating it
+          // Re-calculate total if it was inferred or missing in this row
           if (current.total === undefined && current.order_total === undefined && current.amount === undefined && current.grand_total === undefined) {
              order.total = order.items.reduce((s: number, i: any) => s + (i.price * i.quantity), 0);
           }
@@ -132,12 +160,17 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
         return sum + Math.floor(order.total || 0);
       }, 0);
       
-      // Use points from server if available (handle common field names)
-      const pointsDataAny = pointsData as any;
+      // Use points from server if available (handle common field names and array responses)
+      let pointsDataAny = pointsData as any;
+      if (Array.isArray(pointsDataAny) && pointsDataAny.length > 0) {
+        pointsDataAny = pointsDataAny[0];
+      }
+
       const pointsFromServerRaw = pointsDataAny.total_points ?? 
                                   pointsDataAny.points ?? 
                                   pointsDataAny.point_balance ?? 
                                   pointsDataAny.points_balance ?? 
+                                  pointsDataAny.points_total ??
                                   pointsDataAny.pts ?? 
                                   pointsDataAny.balance ?? 
                                   null;
