@@ -75,7 +75,7 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
             status: current.status || 'COMPLETED',
             created_at: current.created_at || current.order_date || current.date || new Date().toISOString(),
             total: total,
-            items: current.items || [],
+            items: current.items || current.order_items || [],
             location_name: current.location_name || current.store_name || current.location,
             location_city_state: current.location_city_state || (current.city && current.state ? `${current.city}, ${current.state}` : current.location)
           });
@@ -313,6 +313,7 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
                   <div className="text-right min-w-[80px]">
                     <p className="text-[9px] text-brand-brown/30 uppercase font-bold tracking-widest mb-0.5">Total</p>
                     <span className="text-base font-bold text-brand-brown">${order.total.toFixed(2)}</span>
+                    <p className="text-[8px] text-brand-red font-bold uppercase tracking-widest mt-1 opacity-0 group-hover:opacity-100 transition-opacity">View Details</p>
                   </div>
                 </div>
               </motion.div>
@@ -373,7 +374,7 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
                               {item.quantity || 1}x
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-brand-brown">{item.name || 'Coffee Item'} {item.size ? `• ${item.size}` : ''}</p>
+                              <p className="text-sm font-bold text-brand-brown">{(item.name || item.item_name || 'Coffee Item')} {item.size ? `• ${item.size}` : ''}</p>
                               <p className="text-[10px] text-brand-brown/40 uppercase font-medium">Item @ ${(item.price || 0).toFixed(2)}</p>
                             </div>
                           </div>

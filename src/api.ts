@@ -34,19 +34,10 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // Menu
-  getMenu: () => 
-    fetcher<Record<string, MenuItem[]>>('/menu/grouped').then(data => 
-      Object.values(data).flat()
-    ),
-  getMenuCategories: () => 
-    fetcher<Record<string, MenuItem[]>>('/menu/grouped').then(data => 
-      Object.keys(data)
-    ),
+  getMenu: () => fetcher<MenuItem[]>('/menu'),
+  getMenuCategories: () => fetcher<string[]>('/menu/categories'),
   getMenuGrouped: () => fetcher<Record<string, MenuItem[]>>('/menu/grouped'),
-  getMenuByCategory: (category: string) => 
-    fetcher<Record<string, MenuItem[]>>('/menu/grouped').then(data => 
-      data[category] || []
-    ),
+  getMenuByCategory: (category: string) => fetcher<MenuItem[]>(`/menu/category/${encodeURIComponent(category)}`),
   searchMenu: (itemName: string) => fetcher<MenuItem[]>(`/menu/search/keyword?q=${encodeURIComponent(itemName)}`),
   getMenuItem: (itemId: string) => fetcher<MenuItem>(`/menu/${itemId}`),
 

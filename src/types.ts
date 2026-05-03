@@ -10,6 +10,8 @@ export interface MenuItem {
   size: string;
   calories: number;
   price: number;
+  image_url?: string;
+  description?: string;
 }
 
 export interface Location {
