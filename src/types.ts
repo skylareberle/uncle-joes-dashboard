@@ -68,6 +68,8 @@ export interface Order {
     price: number 
   }>;
   total: number;
+  subtotal?: number;
+  discount?: number;
   status: string;
   created_at: string;
   location_name?: string;

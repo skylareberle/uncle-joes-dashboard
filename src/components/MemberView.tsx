@@ -121,12 +121,17 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
           const total = Number(current.total ?? current.order_total ?? current.amount ?? current.grand_total ?? current.order_amount ?? 
                         itemsForThisRow.reduce((s: number, i: any) => s + (i.price * i.quantity), 0));
           
+          const discount = Number(current.discount ?? current.discount_amount ?? current.savings ?? current.promo_deduction ?? 0);
+          const subtotal = Number(current.subtotal ?? current.sub_total ?? current.amount_before_discount ?? (total + discount));
+          
           acc.push({
             id: orderId,
             member_id: current.member_id || current.memberId || mId,
             status: current.status || current.order_status || 'COMPLETED',
             created_at: current.created_at || current.order_date || current.date || current.timestamp || new Date().toISOString(),
             total: total,
+            subtotal: subtotal,
+            discount: discount,
             items: [...itemsForThisRow],
             location_name: current.location_name || current.store_name || current.location || current.store,
             location_city_state: current.location_city_state || (current.city && current.state ? `${current.city}, ${current.state}` : '')
@@ -145,9 +150,19 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
             }
           });
           
-          // Re-calculate total if it was inferred or missing in this row
+          // Re-calculate total/discount/subtotal if it was inferred or missing in this row
           if (current.total === undefined && current.order_total === undefined && current.amount === undefined && current.grand_total === undefined) {
              order.total = order.items.reduce((s: number, i: any) => s + (i.price * i.quantity), 0);
+          }
+          
+          // Update discount/subtotal if found in subsequent rows of the same order
+          const rowDiscount = Number(current.discount ?? current.discount_amount ?? current.savings ?? current.promo_deduction ?? 0);
+          if (rowDiscount > (order.discount || 0)) {
+            order.discount = rowDiscount;
+          }
+          const rowSubtotal = Number(current.subtotal ?? current.sub_total ?? current.amount_before_discount ?? 0);
+          if (rowSubtotal > (order.subtotal || 0)) {
+            order.subtotal = rowSubtotal;
           }
         }
         return acc;
@@ -482,6 +497,21 @@ export default function MemberView({ isLoggedIn, setIsLoggedIn }: MemberViewProp
 
                 {/* Totals */}
                 <div className="pt-4 border-t border-brand-brown/5 space-y-2">
+                  {selectedOrder.discount && selectedOrder.discount > 0 ? (
+                    <>
+                      <div className="flex justify-between items-center text-brand-brown/60">
+                        <span className="text-xs font-bold uppercase tracking-widest">Subtotal</span>
+                        <span className="text-xs font-bold">${(selectedOrder.subtotal || selectedOrder.total + selectedOrder.discount).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-green-600">
+                        <span className="text-xs font-bold uppercase tracking-widest flex items-center gap-1.5">
+                          <CheckCircle2 size={12} />
+                          Discount Applied
+                        </span>
+                        <span className="text-xs font-bold">-${selectedOrder.discount.toFixed(2)}</span>
+                      </div>
+                    </>
+                  ) : null}
                   <div className="flex justify-between items-center text-brand-brown/60">
                     <span className="text-xs font-bold uppercase tracking-widest">Date</span>
                     <span className="text-xs font-bold">{new Date(selectedOrder.created_at).toLocaleString()}</span>

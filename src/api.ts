@@ -8,13 +8,21 @@ import { MenuItem, Location, Member, Order, LoginResponse } from './types';
 const BASE_URL = 'https://uncle-joes-api-556060884056.us-central1.run.app';
 
 async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
+  } catch (error: any) {
+    if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
+      throw new Error(`Network error or CORS issue. Please check the Cloud Run logs for 'uncle-joes-api'. The backend might have crashed before returning CORS headers.`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -35,21 +43,47 @@ async function fetcher<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   // Menu
   getMenu: () => fetcher<MenuItem[]>('/menu'),
-  getMenuCategories: () => fetcher<string[]>('/menu/categories'),
-  getMenuGrouped: () => fetcher<Record<string, MenuItem[]>>('/menu/grouped'),
-  getMenuByCategory: (category: string) => fetcher<MenuItem[]>(`/menu/category/${encodeURIComponent(category)}`),
-  searchMenu: (itemName: string) => fetcher<MenuItem[]>(`/menu/search/keyword?q=${encodeURIComponent(itemName)}`),
+  getMenuCategories: async () => {
+    const items = await fetcher<MenuItem[]>('/menu');
+    const categories = new Set(items.map(item => item.category));
+    return Array.from(categories);
+  },
+  getMenuGrouped: async () => {
+    const items = await fetcher<MenuItem[]>('/menu');
+    const grouped: Record<string, MenuItem[]> = {};
+    for (const item of items) {
+      if (!grouped[item.category]) {
+        grouped[item.category] = [];
+      }
+      grouped[item.category].push(item);
+    }
+    return grouped;
+  },
+  getMenuByCategory: async (category: string) => {
+    const items = await fetcher<MenuItem[]>('/menu');
+    return items.filter(item => item.category === category);
+  },
+  searchMenu: async (itemName: string) => {
+    const items = await fetcher<MenuItem[]>('/menu');
+    const lowerQuery = itemName.toLowerCase();
+    return items.filter(item => item.name.toLowerCase().includes(lowerQuery));
+  },
   getMenuItem: (itemId: string) => fetcher<MenuItem>(`/menu/${itemId}`),
 
   // Locations
-  getLocations: () => 
-    // Fallback to searching by a common state or just fetching all states then locations
-    // But let's try /locations first as it might be there even if not in openapi.json
-    // Actually, according to openapi, we should probably use states to fetch them.
-    fetcher<Location[]>('/locations').catch(() => []), 
-  getLocationStates: () => fetcher<string[]>('/locations/states'),
-  getLocationsByState: (state: string) => fetcher<Location[]>(`/locations/filter/state/${encodeURIComponent(state)}`),
-  getLocationsByCity: (city: string) => fetcher<Location[]>(`/locations/filter/city/${encodeURIComponent(city)}`),
+  getLocations: () => fetcher<Location[]>('/locations').catch(() => []),
+  getLocationStates: async () => {
+    const locations = await fetcher<Location[]>('/locations').catch(() => []);
+    const states = new Set(locations.map(l => l.state));
+    return Array.from(states).filter(Boolean);
+  },
+  getLocationsByState: async (state: string) => {
+    const locations = await fetcher<Location[]>('/locations').catch(() => []);
+    return locations.filter(l => l.state === state);
+  },
+  getLocationsByCity: async (city: string) => {
+    return fetcher<Location[]>(`/locations/search?query_str=${encodeURIComponent(city)}`).catch(() => []);
+  },
   getLocation: (locationId: string) => fetcher<Location>(`/locations/${locationId}`),
 
   // Auth & Members
